@@ -5,6 +5,7 @@ import { useFullScreenLoader } from '@/hooks/use-full-screen-spinner';
 import { useRedoUndoStack } from '@/hooks/use-redo-undo-stack';
 import { useStorage } from '@/hooks/use-storage';
 import type { Diagram } from '@/lib/domain/diagram';
+import { diagramFromJSONInput } from '@/lib/export-import-utils';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -17,9 +18,25 @@ export const useDiagramLoader = () => {
     const { showLoader, hideLoader } = useFullScreenLoader();
     const { openCreateDiagramDialog, openOpenDiagramDialog } = useDialog();
     const navigate = useNavigate();
-    const { listDiagrams } = useStorage();
+    const { listDiagrams, addDiagram } = useStorage();
 
     const currentDiagramLoadingRef = useRef<string | undefined>(undefined);
+
+    const loadSchemaFromPublic = async (): Promise<Diagram | null> => {
+        try {
+            const response = await fetch('/bs-schema.json');
+            if (!response.ok) {
+                console.log('No schema file found in public folder');
+                return null;
+            }
+            const jsonContent = await response.text();
+            const diagram = diagramFromJSONInput(jsonContent);
+            return diagram;
+        } catch (error) {
+            console.error('Failed to load schema from public folder:', error);
+            return null;
+        }
+    };
 
     useEffect(() => {
         if (!config) {
@@ -60,7 +77,23 @@ export const useDiagramLoader = () => {
             if (diagrams.length > 0) {
                 openOpenDiagramDialog({ canClose: false });
             } else {
-                openCreateDiagramDialog();
+                // Try to load schema from public folder before showing create dialog
+                const publicSchema = await loadSchemaFromPublic();
+                if (publicSchema) {
+                    try {
+                        await addDiagram({ diagram: publicSchema });
+                        navigate(`/diagrams/${publicSchema.id}`);
+                        return;
+                    } catch (error) {
+                        console.error(
+                            'Failed to save schema from public folder:',
+                            error
+                        );
+                        openCreateDiagramDialog();
+                    }
+                } else {
+                    openCreateDiagramDialog();
+                }
             }
         };
 
@@ -86,6 +119,7 @@ export const useDiagramLoader = () => {
         showLoader,
         currentDiagram?.id,
         openOpenDiagramDialog,
+        addDiagram,
     ]);
 
     return { initialDiagram };
